@@ -1,0 +1,81 @@
+name: secwatcher
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-secfile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download
+        env:
+          SEC_URL: ${{ secrets.SEC_FILE_URL }}
+        run: |
+          curl -fsSL "$SEC_URL" -o /tmp/secfile_new
+          echo "Download successful."
+
+      - name: Check for changes
+        id: shacheck
+        run: |
+          NEW_SHA=$(sha256sum /tmp/secfile_new | awk '{print $1}')
+          echo "New SHA: $NEW_SHA"
+
+          LAST_SHA_FILE=".last_sha"
+          if [ -f "$LAST_SHA_FILE" ]; then
+            LAST_SHA=$(cat "$LAST_SHA_FILE")
+          else
+            LAST_SHA=""
+          fi
+          echo "Last SHA: ${LAST_SHA:-<none>}"
+
+          if [ "$NEW_SHA" = "$LAST_SHA" ]; then
+            echo "No changes detected. Skipping."
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Change detected!"
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "$NEW_SHA" > .last_sha
+          fi
+
+      - name: Archive old file and save new one
+        if: steps.shacheck.outputs.changed == 'true'
+        run: |
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          CURRENT=$(ls secfile_* 2>/dev/null | head -n 1 || true)
+          if [ -n "$CURRENT" ]; then
+            BASENAME=$(basename "$CURRENT")
+            STEM="${BASENAME%.*}"
+            EXT="${BASENAME##*.}"
+
+            if [ "$STEM" = "$EXT" ]; then
+              ARCHIVED="old/${STEM}_${TIMESTAMP}"
+            else
+              ARCHIVED="old/${STEM}_${TIMESTAMP}.${EXT}"
+            fi
+
+            mv "$CURRENT" "$ARCHIVED"
+            echo "Archived old file -> $ARCHIVED"
+          fi
+
+          NEW_FILENAME="secfile_${TIMESTAMP}"
+          cp /tmp/secfile_new "${NEW_FILENAME}"
+          echo "Saved new file -> ${NEW_FILENAME}"
+
+      - name: Commit and push changes
+        if: steps.shacheck.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add secfile_* old/ .last_sha
+          git commit -m "chore: update secfile $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          git push
