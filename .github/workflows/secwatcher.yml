@@ -20,6 +20,8 @@ jobs:
         env:
           SEC_URL: ${{ secrets.SEC_FILE_URL }}
         run: |
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          echo "FETCH_TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
           curl -fsSL "$SEC_URL" -o /tmp/secfile_new
           echo "Download successful."
 
@@ -46,29 +48,18 @@ jobs:
             echo "$NEW_SHA" > .last_sha
           fi
 
-      - name: Archive old file and save new one
+      - name: Archive and update
         if: steps.shacheck.outputs.changed == 'true'
         run: |
-          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
-          CURRENT=$(ls secfile_* 2>/dev/null | head -n 1 || true)
-          if [ -n "$CURRENT" ]; then
-            BASENAME=$(basename "$CURRENT")
-            STEM="${BASENAME%.*}"
-            EXT="${BASENAME##*.}"
+          mkdir -p old
 
-            if [ "$STEM" = "$EXT" ]; then
-              ARCHIVED="old/${STEM}_${TIMESTAMP}"
-            else
-              ARCHIVED="old/${STEM}_${TIMESTAMP}.${EXT}"
-            fi
-
-            mv "$CURRENT" "$ARCHIVED"
-            echo "Archived old file -> $ARCHIVED"
+          if [ -f "secfile_latest" ]; then
+            cp "secfile_latest" "old/secfile_${FETCH_TIMESTAMP}"
+            echo "Archived -> old/secfile_${FETCH_TIMESTAMP}"
           fi
 
-          NEW_FILENAME="secfile_${TIMESTAMP}"
-          cp /tmp/secfile_new "${NEW_FILENAME}"
-          echo "Saved new file -> ${NEW_FILENAME}"
+          cp /tmp/secfile_new secfile_latest
+          echo "Updated secfile_latest"
 
       - name: Commit and push changes
         if: steps.shacheck.outputs.changed == 'true'
@@ -76,6 +67,6 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add secfile_* old/ .last_sha
-          git commit -m "chore: update secfile $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          git add secfile_latest old/ .last_sha
+          git commit -m "chore: update secfile ${{ env.FETCH_TIMESTAMP }}"
           git push
