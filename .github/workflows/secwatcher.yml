@@ -16,12 +16,21 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Get latest version
+        id: version
+        run: |
+          VERSION=$(curl -s 'https://sg-hyp-api.hoyoverse.com/hyp/hyp-connect/api/getGameBranches?launcher_id=VYTpXlbWo8' \
+            | jq -r '.data.game_branches[] | select(.game.biz=="hk4e_global") | .main.tag')
+          echo "Detected version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Download
-        env:
-          SEC_URL: ${{ secrets.SEC_FILE_URL }}
         run: |
           TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
           echo "FETCH_TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
+          VERSION="${{ steps.version.outputs.version }}"
+          SEC_URL="https://dispatchosglobal.yuanshen.com/query_security_file?file_key=OSRELWin${VERSION}"
+          echo "Fetching: $SEC_URL"
           curl -fsSL "$SEC_URL" -o /tmp/secfile_new
           echo "Download successful."
 
@@ -68,5 +77,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add secfile_latest old/ .last_sha
-          git commit -m "chore: update secfile ${{ env.FETCH_TIMESTAMP }}"
+          git commit -m "chore: update secfile ${{ env.FETCH_TIMESTAMP }} (v${{ steps.version.outputs.version }})"
           git push
